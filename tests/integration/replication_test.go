@@ -1000,4 +1000,119 @@ var _ = Describe("Replication", func() {
 	//		}
 	//	})
 	//})
+
+	Describe("After executing MigrateSlot", func() {
+		Context("perform master-slave replication", func() {
+			It("should stay in sync", func() {
+				mu.Lock()
+				defer mu.Unlock()
+
+				master.ConfigSet(ctx, "slotmigrate", "yes")
+				slave.ConfigSet(ctx, "slotmigrate", "no")
+
+				setKey1 := "setKey_000"
+				setKey2 := "setKey_001"
+				setKey3 := "setKey_002"
+				setKey4 := "setKey_store"
+
+				if delaySlaveOf {
+					Expect(slave.SlaveOf(ctx, masterIP, masterPort).Err()).NotTo(HaveOccurred())
+				}
+				// wait for replication
+				time.Sleep(20 * time.Second)
+
+				for i := 0; i < 5; i++ {
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SDiffStore(ctx, setKey4, setKey1, setKey2)
+				}
+
+				Expect(slave.SlaveOf(ctx, masterIP, masterPort).Err()).NotTo(HaveOccurred())
+				time.Sleep(20 * time.Second)
+
+				mSet1 := master.SMembers(ctx, setKey1).Val()
+				mSet2 := master.SMembers(ctx, setKey2).Val()
+				mSet3 := master.SMembers(ctx, setKey3).Val()
+				mDestSet := master.SMembers(ctx, setKey4).Val()
+
+				sSet1 := slave.SMembers(ctx, setKey1).Val()
+				sSet2 := slave.SMembers(ctx, setKey2).Val()
+				sSet3 := slave.SMembers(ctx, setKey3).Val()
+				sDestSet := slave.SMembers(ctx, setKey4).Val()
+
+				Expect(sSet1).To(Equal(mSet1))
+				Expect(sSet2).To(Equal(mSet2))
+				Expect(sSet3).To(Equal(mSet3))
+				Expect(sDestSet).To(Equal(mDestSet))
+
+				// Disconnect master and slave
+				Expect(slave.SlaveOf(ctx, "no", "one").Err()).NotTo(HaveOccurred())
+
+				// Add more data to master
+				for i := 0; i < 5; i++ {
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SAdd(ctx, setKey2, randStr(5))
+					master.SAdd(ctx, setKey1, randStr(5))
+					master.SAdd(ctx, setKey3, randStr(5))
+					master.SDiffStore(ctx, setKey4, setKey1, setKey2)
+				}
+
+				// Reconnect master and slave
+				Expect(slave.SlaveOf(ctx, masterIP, masterPort).Err()).NotTo(HaveOccurred())
+				time.Sleep(25 * time.Second)
+
+				mSet1 = master.SMembers(ctx, setKey1).Val()
+				mSet2 = master.SMembers(ctx, setKey2).Val()
+				mSet3 = master.SMembers(ctx, setKey3).Val()
+				mDestSet = master.SMembers(ctx, setKey4).Val()
+
+				time.Sleep(15 * time.Second)
+
+				sSet1 = slave.SMembers(ctx, setKey1).Val()
+				sSet2 = slave.SMembers(ctx, setKey2).Val()
+				sSet3 = slave.SMembers(ctx, setKey3).Val()
+				sDestSet = slave.SMembers(ctx, setKey4).Val()
+
+				Expect(sSet1).To(Equal(mSet1))
+				Expect(sSet2).To(Equal(mSet2))
+				Expect(sSet3).To(Equal(mSet3))
+				Expect(sDestSet).To(Equal(mDestSet))
+
+				// Slave node should not have slot key
+				sKeys, _ := slave.Keys(ctx, "*").Result()
+				for _, key := range sKeys {
+					Expect(key).NotTo(Or(
+						ContainSubstring("_internal:slotkey:4migrate:"),
+						ContainSubstring("_internal:slottag:4migrate:"),
+					))
+				}
+			})
+		})
+	})
 })
